@@ -36,53 +36,74 @@ select{font:inherit;padding:8px;border-radius:6px;border:2px solid var(--bd);bac
 var D=JSON.parse(document.getElementById("data").textContent);
 var app=document.getElementById("app"),L="ABCD";
 var store={get:function(k,d){try{var v=localStorage.getItem("tsi_"+k);return v?JSON.parse(v):d}catch(e){return d}},set:function(k,v){try{localStorage.setItem("tsi_"+k,JSON.stringify(v))}catch(e){}}};
-var S=null,timer=null,F=null;
+var S=null,T=null,timer=null,F=null,ONL=null;
 function esc(s){return String(s).replace(/[&<>"]/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]})}
-function secName(n){return n<=20?"Mathematics":(n<=35?"Reading":"Writing")}
+function secOf(q,k){return q.sec||(k<20?"Mathematics":(k<35?"Reading":"Writing"))}
 function fmt(t){var m=Math.floor(t/60),s=t%60;return m+":"+(s<10?"0":"")+s}
+function rowHtml(m){var b=store.get("best",{})[m.id];return '<div class="card a"><b>'+esc(m.title)+'</b> <small>'+m.size+' questions'+(b!=null?" &middot; best score "+b+" of "+m.size:"")+'</small><br><button onclick="startSet(\''+m.id+'\')">Start</button>'+(store.get("saved_"+m.id,null)?'<button class="alt" onclick="startSet(\''+m.id+'\',true)">Resume</button>':"")+'</div>'}
 function home(){
- clearInterval(timer);S=null;F=null;var best=store.get("best",{});
- var h='<h2>Practice Tests</h2><div class="card"><p>Six full-length tests, each with 20 mathematics questions and 30 reading and writing questions, the same questions and answer letters as in the book. The real assessment is untimed and adaptive; these tests are fixed-order and you may turn the clock on or off. Finish a test, then read every explanation.</p>'+
+ clearInterval(timer);S=null;T=null;F=null;
+ var h='<h2>Practice Tests 1 to 6</h2><div class="card"><p>The six full-length tests from the book, with the same questions and answer letters as the printed pages. Each has 20 mathematics questions and 30 reading and writing questions. The real assessment is untimed and adaptive; these tests are fixed-order and you may turn the clock on or off. Finish a test, then read every explanation.</p>'+
  '<label>Clock: <select id="clk"><option value="0">Off (untimed)</option><option value="90">90 minutes</option><option value="120">120 minutes</option></select></label></div>';
- D.tests.forEach(function(t,i){var b=best[t.id];h+='<div class="card a"><b>'+t.title+'</b> <small>50 questions'+(b!=null?" &middot; best score "+b+" of 50":"")+'</small><br><button onclick="startTest('+i+')">Start</button>'+(store.get("saved_"+t.id,null)?'<button class="alt" onclick="startTest('+i+',true)">Resume</button>':"")+'</div>'});
- h+='<h2>Flashcards</h2><div class="card"><p>'+D.cards.length+' key terms and ideas from the book&rsquo;s glossary.</p><button onclick="startCards(\'All\')">All cards</button><button class="alt" onclick="startCards(\'Math\')">Math only</button><button class="alt" onclick="startCards(\'Reading and writing\')">Reading and writing only</button></div>'+
+ D.tests.forEach(function(t){h+=rowHtml({id:t.id,title:t.title,size:t.items.length})});
+ h+='<div id="onl"><h2>More online practice</h2><p class="note">Loading the additional online sets&hellip;</p></div>';
+ h+='<h2>Flashcards</h2><div class="card"><p>'+D.cards.length+' key terms and ideas from the book&rsquo;s glossary and appendices.</p><button onclick="startCards(\'All\')">All cards</button><button class="alt" onclick="startCards(\'Math\')">Math only</button><button class="alt" onclick="startCards(\'Reading and writing\')">Reading and writing only</button></div>'+
  '<p class="note">An independent study aid. Not affiliated with or endorsed by the Texas Higher Education Coordinating Board, any college, or the testing vendor. It contains no actual test questions. Confirm current requirements with your college. Your progress is saved only in this browser.</p>';
- app.innerHTML=h}
-function startTest(i,resume){
- var t=D.tests[i],lim=+document.getElementById("clk").value;
- var sv=resume?store.get("saved_"+t.id,null):null;
- S=sv||{i:i,ans:{},flag:{},cur:0,left:lim?lim*60:0,lim:lim};
- if(S.lim){timer=setInterval(function(){S.left--;var e=document.getElementById("tm");if(e)e.textContent=fmt(Math.max(S.left,0));if(S.left<=0){clearInterval(timer);finish()}persist()},1000)}
- drawQ()}
-function persist(){store.set("saved_"+D.tests[S.i].id,S)}
+ app.innerHTML=h;loadOnline()}
+function renderOnline(idx){
+ ONL=idx;var el=document.getElementById("onl");if(!el)return;
+ var tests=idx.sets.filter(function(x){return x.kind==="test"}),dr=idx.sets.filter(function(x){return x.kind==="drill"});
+ var math=dr.filter(function(x){return /^D[1-6]$/.test(x.domain)}),rw=dr.filter(function(x){return !/^D[1-6]$/.test(x.domain)});
+ var h='<h2>More online practice: '+idx.total.toLocaleString()+' questions</h2><div class="card"><p>These sets are online only. They add '+tests.length+' more full-length tests and '+dr.length+' topic drills in math, reading and writing. Choose the clock setting above before you start a test. Drills are untimed.</p></div>';
+ h+='<h2>Full-length tests</h2>'+tests.map(rowHtml).join("");
+ h+='<h2>Math topic drills</h2>'+math.map(rowHtml).join("");
+ h+='<h2>Reading and writing topic drills</h2>'+rw.map(rowHtml).join("");
+ el.innerHTML=h}
+function loadOnline(){
+ if(ONL){renderOnline(ONL);return}
+ fetch("d_index.json").then(function(r){if(!r.ok)throw 0;return r.json()}).then(renderOnline).catch(function(){var el=document.getElementById("onl");if(el)el.innerHTML='<h2>More online practice</h2><p class="note">The additional online sets could not be loaded. Open this page from its web address with an internet connection.</p>'})}
+function getSet(id){
+ var t=D.tests.filter(function(x){return x.id===id})[0];
+ if(t)return Promise.resolve(t);
+ return fetch("d_"+id+".json").then(function(r){if(!r.ok)throw 0;return r.json()})}
+function startSet(id,resume){
+ var clk=document.getElementById("clk");var lim=clk?+clk.value:0;
+ getSet(id).then(function(t){
+  T=t;var sv=resume?store.get("saved_"+id,null):null;
+  if(t.kind==="drill")lim=0;
+  S=sv||{id:id,ans:{},flag:{},cur:0,left:lim?lim*60:0,lim:lim};
+  clearInterval(timer);
+  if(S.lim){timer=setInterval(function(){S.left--;var e=document.getElementById("tm");if(e)e.textContent=fmt(Math.max(S.left,0));if(S.left<=0){clearInterval(timer);finish()}persist()},1000)}
+  drawQ()}).catch(function(){alert("This set could not be loaded. Check your internet connection and try again.")})}
+function persist(){store.set("saved_"+S.id,S)}
 function drawQ(){
- var t=D.tests[S.i],q=t.items[S.cur];persist();
- var h='<div class="bar"><span>'+t.title+' &middot; Question '+(S.cur+1)+' of 50 &middot; '+secName(S.cur+1)+'</span><span>'+(S.lim?'Time left <b id="tm">'+fmt(S.left)+'</b>':'Untimed')+'</span></div>'+
- '<div class="grid">'+t.items.map(function(_,k){return'<button class="'+(S.ans[k]!=null?"done ":"")+(S.flag[k]?"flag ":"")+(k==S.cur?"cur":"")+'" onclick="go('+k+')">'+(k+1)+'</button>'}).join("")+'</div>'+
+ var N=T.items.length,q=T.items[S.cur];persist();
+ var h='<div class="bar"><span>'+esc(T.title)+' &middot; Question '+(S.cur+1)+' of '+N+' &middot; '+secOf(q,S.cur)+'</span><span>'+(S.lim?'Time left <b id="tm">'+fmt(S.left)+'</b>':'Untimed')+'</span></div>'+
+ '<div class="grid">'+T.items.map(function(_,k){return'<button class="'+(S.ans[k]!=null?"done ":"")+(S.flag[k]?"flag ":"")+(k==S.cur?"cur":"")+'" onclick="go('+k+')">'+(k+1)+'</button>'}).join("")+'</div>'+
  '<div class="stem">'+esc(q.stem)+'</div>';
  q.options.forEach(function(o,k){h+='<button class="opt'+(S.ans[S.cur]===k?" sel":"")+'" onclick="pick('+k+')"><b>'+L[k]+'.</b> '+esc(o)+'</button>'});
- h+='<button class="alt" onclick="go('+(S.cur-1)+')"'+(S.cur?"":" disabled")+'>Back</button><button class="alt" onclick="go('+(S.cur+1)+')"'+(S.cur<49?"":" disabled")+'>Next</button><button class="alt" onclick="flag()">'+(S.flag[S.cur]?"Unflag":"Flag for review")+'</button><button class="warn" onclick="submit()">Finish test</button>';
+ h+='<button class="alt" onclick="go('+(S.cur-1)+')"'+(S.cur?"":" disabled")+'>Back</button><button class="alt" onclick="go('+(S.cur+1)+')"'+(S.cur<N-1?"":" disabled")+'>Next</button><button class="alt" onclick="flag()">'+(S.flag[S.cur]?"Unflag":"Flag for review")+'</button><button class="warn" onclick="submit()">Finish</button>';
  app.innerHTML=h;window.scrollTo(0,0)}
-function go(k){if(k<0||k>49)return;S.cur=k;drawQ()}
+function go(k){if(k<0||k>=T.items.length)return;S.cur=k;drawQ()}
 function pick(k){S.ans[S.cur]=k;drawQ()}
 function flag(){S.flag[S.cur]=!S.flag[S.cur];drawQ()}
-function submit(){var un=50-Object.keys(S.ans).length;if(un&&!confirm(un+" question(s) are unanswered. Finish anyway?"))return;finish()}
+function submit(){var un=T.items.length-Object.keys(S.ans).length;if(un&&!confirm(un+" question(s) are unanswered. Finish anyway?"))return;finish()}
 function finish(){
- clearInterval(timer);var t=D.tests[S.i],sec={Mathematics:[0,0],Reading:[0,0],Writing:[0,0]},tot=0,miss=[];
- t.items.forEach(function(q,k){var s=secName(k+1);sec[s][1]++;if(S.ans[k]===q.answer){sec[s][0]++;tot++}else miss.push(k)});
- var best=store.get("best",{});if(best[t.id]==null||tot>best[t.id])best[t.id]=tot;store.set("best",best);
- var hist=store.get("hist",[]);hist.push({t:t.title,s:tot,d:new Date().toLocaleDateString()});store.set("hist",hist.slice(-30));
- try{localStorage.removeItem("tsi_saved_"+t.id)}catch(e){}
- var h='<h2>'+t.title+' results</h2><div class="card"><p style="font-size:1.4rem"><b>'+tot+' of 50 correct</b> ('+(tot*2)+' percent)</p><table><tr><th>Section</th><th>Correct</th></tr>'+
+ clearInterval(timer);var N=T.items.length,sec={},tot=0,miss=[];
+ T.items.forEach(function(q,k){var s=secOf(q,k);sec[s]=sec[s]||[0,0];sec[s][1]++;if(S.ans[k]===q.answer){sec[s][0]++;tot++}else miss.push(k)});
+ var best=store.get("best",{});if(best[S.id]==null||tot>best[S.id])best[S.id]=tot;store.set("best",best);
+ var hist=store.get("hist",[]);hist.push({t:T.title,n:N,s:tot,d:new Date().toLocaleDateString()});store.set("hist",hist.slice(-30));
+ try{localStorage.removeItem("tsi_saved_"+S.id)}catch(e){}
+ var h='<h2>'+esc(T.title)+' results</h2><div class="card"><p style="font-size:1.4rem"><b>'+tot+' of '+N+' correct</b> ('+Math.round(tot*100/N)+' percent)</p><table><tr><th>Section</th><th>Correct</th></tr>'+
  Object.keys(sec).map(function(k){return"<tr><td>"+k+"</td><td>"+sec[k][0]+" of "+sec[k][1]+"</td></tr>"}).join("")+'</table>'+
  '<p class="note">Percent correct is a practice measure only. It is not a predicted TSI score, and colleges set their own score requirements.</p></div>'+
  '<button onclick="review(false)">Review all explanations</button><button class="alt" onclick="review(true)">Review only my misses ('+miss.length+')</button><button class="alt" onclick="home()">Back to home</button>';
- if(hist.length>1)h+='<h2>Recent attempts</h2><table><tr><th>Test</th><th>Score</th><th>Date</th></tr>'+hist.slice(-8).reverse().map(function(x){return"<tr><td>"+x.t+"</td><td>"+x.s+" of 50</td><td>"+x.d+"</td></tr>"}).join("")+'</table>';
+ if(hist.length>1)h+='<h2>Recent attempts</h2><table><tr><th>Set</th><th>Score</th><th>Date</th></tr>'+hist.slice(-8).reverse().map(function(x){return"<tr><td>"+esc(x.t)+"</td><td>"+x.s+" of "+(x.n||50)+"</td><td>"+x.d+"</td></tr>"}).join("")+'</table>';
  app.innerHTML=h;window.scrollTo(0,0)}
 function review(onlyMiss){
- var t=D.tests[S.i],h='<h2>'+t.title+' review</h2><button class="alt" onclick="home()">Back to home</button>';
- t.items.forEach(function(q,k){var mine=S.ans[k];if(onlyMiss&&mine===q.answer)return;
-  h+='<div class="card"><b>Question '+(k+1)+'</b> <small>'+secName(k+1)+'</small><div class="stem">'+esc(q.stem)+'</div>';
+ var h='<h2>'+esc(T.title)+' review</h2><button class="alt" onclick="home()">Back to home</button>';
+ T.items.forEach(function(q,k){var mine=S.ans[k];if(onlyMiss&&mine===q.answer)return;
+  h+='<div class="card"><b>Question '+(k+1)+'</b> <small>'+secOf(q,k)+'</small><div class="stem">'+esc(q.stem)+'</div>';
   q.options.forEach(function(o,j){h+='<div class="opt '+(j===q.answer?"good":(j===mine?"wrong":""))+'"><b>'+L[j]+'.</b> '+esc(o)+(j===q.answer?" (correct)":"")+(j===mine&&j!==q.answer?" (your answer)":"")+'</div>'});
   if(mine==null)h+='<p class="note">You left this unanswered.</p>';
   h+='<div class="expl"><b>Explanation.</b> '+esc(q.explanation)+'</div></div>'});
